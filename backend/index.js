@@ -12,6 +12,8 @@ app.use(express.json({ limit: "1mb" }));
 const OFFICIAL_EMAIL = process.env.OFFICIAL_EMAIL || "";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const allowedKeys = new Set(["fibonacci", "prime", "lcm", "hcf", "AI"]);
+const MAX_ARRAY_LENGTH = 10000;
+const MAX_FIB_COUNT = 10000;
 
 function successPayload(data) {
 	return { is_success: true, official_email: OFFICIAL_EMAIL, data };
@@ -22,11 +24,16 @@ function errorPayload(message) {
 }
 
 function isInteger(value) {
-	return Number.isInteger(value);
+	return Number.isSafeInteger(value);
 }
 
 function isIntegerArray(arr) {
-	return Array.isArray(arr) && arr.length > 0 && arr.every(isInteger);
+	return (
+		Array.isArray(arr) &&
+		arr.length > 0 &&
+		arr.length <= MAX_ARRAY_LENGTH &&
+		arr.every(isInteger)
+	);
 }
 
 function fibonacciSeries(count) {
@@ -79,6 +86,7 @@ async function getAiSingleWord(question) {
 	}
 	const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 	const model = genAI.getGenerativeModel({ model: "gemini-flash-lite-latest" });
+	// Keep the AI response tiny and forced into one clean word.
 	const prompt = `Answer in a single word only. No punctuation. Question: ${question}`;
 	const result = await model.generateContent({
 		contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -110,13 +118,18 @@ app.post("/bfhl", async (req, res) => {
 		}
 
 		const value = req.body[key];
+		// Guardrails keep the API predictable under weird inputs.
 
 		switch (key) {
 			case "fibonacci":
-				if (!isInteger(value) || value < 1) {
+				if (!isInteger(value) || value < 1 || value > MAX_FIB_COUNT) {
 					return res
 						.status(400)
-						.json(errorPayload("fibonacci must be an integer >= 1"));
+						.json(
+							errorPayload(
+								`fibonacci must be an integer between 1 and ${MAX_FIB_COUNT}`
+							)
+						);
 				}
 				return res.json(successPayload(fibonacciSeries(value)));
 
@@ -124,7 +137,11 @@ app.post("/bfhl", async (req, res) => {
 				if (!isIntegerArray(value)) {
 					return res
 						.status(400)
-						.json(errorPayload("prime must be a non-empty integer array"));
+						.json(
+							errorPayload(
+								`prime must be a non-empty integer array (max ${MAX_ARRAY_LENGTH})`
+							)
+						);
 				}
 				return res.json(successPayload(value.filter(isPrime)));
 
@@ -132,7 +149,11 @@ app.post("/bfhl", async (req, res) => {
 				if (!isIntegerArray(value) || value.some((v) => v < 1)) {
 					return res
 						.status(400)
-						.json(errorPayload("lcm must be a non-empty array of integers >= 1"));
+						.json(
+							errorPayload(
+								`lcm must be a non-empty array of integers >= 1 (max ${MAX_ARRAY_LENGTH})`
+							)
+						);
 				}
 				return res.json(successPayload(lcmArray(value)));
 
@@ -140,7 +161,11 @@ app.post("/bfhl", async (req, res) => {
 				if (!isIntegerArray(value) || value.some((v) => v < 1)) {
 					return res
 						.status(400)
-						.json(errorPayload("hcf must be a non-empty array of integers >= 1"));
+						.json(
+							errorPayload(
+								`hcf must be a non-empty array of integers >= 1 (max ${MAX_ARRAY_LENGTH})`
+							)
+						);
 				}
 				return res.json(successPayload(hcfArray(value)));
 
