@@ -11,6 +11,7 @@ app.use(express.json({ limit: "1mb" }));
 
 const OFFICIAL_EMAIL = process.env.OFFICIAL_EMAIL || "";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_API_KEY_FALLBACK = process.env.GEMINI_API_KEY_FALLBACK || "";
 const allowedKeys = new Set(["fibonacci", "prime", "lcm", "hcf", "AI"]);
 const MAX_ARRAY_LENGTH = 10000;
 const MAX_FIB_COUNT = 10000;
@@ -84,17 +85,29 @@ async function getAiSingleWord(question) {
 	if (!GEMINI_API_KEY) {
 		throw new Error("GEMINI_API_KEY missing");
 	}
-	const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-	const model = genAI.getGenerativeModel({ model: "gemini-flash-lite-latest" });
-	// Keep the AI response tiny and forced into one clean word.
 	const prompt = `Answer in a single word only. No punctuation. Question: ${question}`;
-	const result = await model.generateContent({
-		contents: [{ role: "user", parts: [{ text: prompt }] }],
-		generationConfig: { maxOutputTokens: 4, temperature: 0.2 }
-	});
-	const text = result.response.text().trim();
-	const first = text.split(/\s+/)[0] || "";
-	return first.replace(/^[^\w-]+|[^\w-]+$/g, "") || first;
+	const generationConfig = { maxOutputTokens: 4, temperature: 0.2 };
+	const tryWithKey = async (apiKey) => {
+		const genAI = new GoogleGenerativeAI(apiKey);
+		const model = genAI.getGenerativeModel({ model: "gemini-flash-lite-latest" });
+		const result = await model.generateContent({
+			contents: [{ role: "user", parts: [{ text: prompt }] }],
+			generationConfig
+		});
+		const text = result.response.text().trim();
+		const first = text.split(/\s+/)[0] || "";
+		return first.replace(/^[^\w-]+|[^\w-]+$/g, "") || first;
+	};
+
+	try {
+		return await tryWithKey(GEMINI_API_KEY);
+	} catch (error) {
+		if (!GEMINI_API_KEY_FALLBACK) {
+			throw error;
+		}
+		// Fallback key helps when the primary hits rate limits.
+		return await tryWithKey(GEMINI_API_KEY_FALLBACK);
+	}
 }
 
 app.get("/health", (req, res) => {
@@ -118,6 +131,7 @@ app.post("/bfhl", async (req, res) => {
 		}
 
 		const value = req.body[key];
+        
 		// Guardrails keep the API predictable under weird inputs.
 
 		switch (key) {
